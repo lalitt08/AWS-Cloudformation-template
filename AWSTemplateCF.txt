@@ -1,0 +1,235 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS CloudFormation template to create a VPC.
+Parameters:
+  VpcCidrBlock:
+    Description: The CIDR block for the VPC
+    Type: String
+    Default: 15.0.0.0/16
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    ConstraintDescription: Must be a valid CIDR block.
+
+  PublicSubnetCidrBlock:
+    Description: The CIDR block for the subnet
+    Type: String
+    Default: 15.0.0.0/17
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    ConstraintDescription: Must be a valid CIDR block.
+
+  PrivateSubnetCidrBlock:
+    Description: The CIDR block for the subnet
+    Type: String
+    Default: 15.0.128.0/17
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    ConstraintDescription: Must be a valid CIDR block.
+Resources:
+  CfVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidrBlock
+      Tags:
+        - Key: Name
+          Value: CfVpc
+
+  CfPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref CfVpc
+      CidrBlock: 15.0.0.0/17
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: CfPublicSubnet
+    DependsOn: CfVpc
+
+  CfPrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref CfVpc
+      CidrBlock: 15.0.128.0/17
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: CfPrivateSubnet
+    DependsOn: CfVpc
+
+  CfIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: CfIgw
+    DependsOn: CfVpc
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref CfVpc
+      InternetGatewayId: !Ref CfIGW
+    DependsOn:
+      - CfVpc
+      - CfIGW
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: eipalloc-074e8fb33d740ea6a
+      SubnetId: !Ref CfPublicSubnet
+      Tags:
+        - Key: Name
+          Value: CfNatgateway
+    DependsOn: CfPublicSubnet
+  CfPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref CfVpc
+      Tags:
+        - Key: Name
+          Value: Cf-Public-Route-Table
+    DependsOn:
+      - CfVpc
+      - AttachGateway
+  CfPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref CfVpc
+      Tags:
+        - Key: Name
+          Value: Cf-Private-Route-Table
+    DependsOn: CfVpc
+  myInternetRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref CfPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref CfIGW
+    DependsOn:
+      - CfPublicRouteTable
+      - CfIGW
+  RouteNATGateway:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref CfPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+    DependsOn:
+      - CfPrivateRouteTable
+      - NATGateway
+  mySubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref CfPublicSubnet
+      RouteTableId: !Ref CfPublicRouteTable
+    DependsOn:
+      - CfPublicSubnet
+      - CfPublicRouteTable
+
+  mySubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref CfPrivateSubnet
+      RouteTableId: !Ref CfPrivateRouteTable
+    DependsOn:
+      - CfPrivateSubnet
+      - CfPrivateRouteTable
+  CfFrontend:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: CfVpc
+    Properties:
+      GroupDescription: SG to test ping
+      VpcId: !Ref CfVpc
+      Tags:
+        - Key: Name
+          Value: CfFrontend
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  CfBackend:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: CfVpc
+    Properties:
+      GroupDescription: SG for backend
+      VpcId: !Ref CfVpc
+      Tags:
+        - Key: Name
+          Value: CfBackend
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+  CfDatabase:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: CfVpc
+    Properties:
+      GroupDescription: SG for backend
+      VpcId: !Ref CfVpc
+      Tags:
+        - Key: Name
+          Value: CfDatabase
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 0.0.0.0/0
+  CfFrontendInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      KeyName: aws-key
+      SubnetId: !Ref CfPublicSubnet
+      ImageId: ami-0d0c3fc16533f895a
+      InstanceType: t2.micro
+      SecurityGroupIds:
+        - !GetAtt CfFrontend.GroupId
+      Tags:
+        - Key: Name
+          Value: CfFrontendInstance
+  CfBackendInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      KeyName: aws-key
+      SubnetId: !Ref CfPrivateSubnet
+      ImageId: ami-05f2cabcca9dbf290
+      InstanceType: t2.micro
+      SecurityGroupIds:
+        - !GetAtt CfBackend.GroupId
+      Tags:
+        - Key: Name
+          Value: CfBackendInstance
+  CfDatabaseInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      KeyName: aws-key
+      SubnetId: !Ref CfPrivateSubnet
+      ImageId: ami-04b261c4dcb1a1a00
+      InstanceType: t2.micro
+      SecurityGroupIds:
+        - !GetAtt CfDatabase.GroupId
+      Tags:
+        - Key: Name
+          Value: CfDatabaseInstance
